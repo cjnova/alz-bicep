@@ -6,7 +6,7 @@ on:
       
 jobs:
   call-azure-login:
-    uses: ./.github/workflows/azure-login.yml
+    uses: ./.github/workflows/azure_login.yml
     with:
       env: DEV
   test:
