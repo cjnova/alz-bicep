@@ -8,7 +8,7 @@ jobs:
   call-azure-login:
     uses: ./.github/workflows/azure_login.yml
     with:
-      env: DEV
+      environment: DEV
   test:
     needs: call-azure-login
     # environment: DEV
