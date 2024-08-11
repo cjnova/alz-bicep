@@ -2,7 +2,7 @@
 
 name: Run Azure CLI Login with OpenID Connect
 on:
-  workflow_call:
+  workflow_dispatch:
 
 permissions:
   id-token: write # Require write permission to Fetch an OIDC token.
