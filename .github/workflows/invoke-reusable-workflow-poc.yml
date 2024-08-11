@@ -1,0 +1,23 @@
+# This is a PoC workflow to invoke a reusable workflow to login in Azure with Federated Credentials
+
+name: Azure login test wit reusable workflow
+on:
+  workflow_dispatch:
+      
+jobs:
+  call-azure-login:
+    uses: ./.github/workflows/azure-login.yml
+    with:
+      env: DEV
+  test:
+    needs: call-azure-login
+    # environment: DEV
+    runs-on: ubuntu-latest
+    steps:
+    - name: Azure CLI script
+      uses: azure/cli@v2
+      with:
+        azcliversion: latest
+        inlineScript: |
+          az account show
+          # You can write your Azure CLI inline scripts here.
