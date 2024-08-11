@@ -15,7 +15,7 @@ jobs:
       environment: DEV
   test:
     needs: call-azure-login
-    # environment: DEV
+    environment: DEV
     runs-on: ubuntu-latest
     steps:
     - name: Azure CLI script
