@@ -3,6 +3,10 @@
 name: Azure login test wit reusable workflow
 on:
   workflow_dispatch:
+
+permissions:
+  id-token: write # Require write permission to Fetch an OIDC token.
+  contents: read
       
 jobs:
   call-azure-login:
