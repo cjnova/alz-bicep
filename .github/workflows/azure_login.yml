@@ -8,9 +8,10 @@ permissions:
   id-token: write # Require write permission to Fetch an OIDC token.
   contents: read
       
-jobs: 
+jobs:
   test:
     runs-on: ubuntu-latest
+    environment: DEV
     steps:
     - name: Azure CLI Login
       uses: azure/login@v2
