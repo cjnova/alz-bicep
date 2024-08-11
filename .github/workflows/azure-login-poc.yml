@@ -1,6 +1,6 @@
 # This is a PoC workflow to Login in Azure with Federated Credentials
 
-name: Run Azure CLI Login with OpenID Connect
+name: PoC Run Azure CLI Login with OpenID Connect
 on:
   workflow_dispatch:
 
