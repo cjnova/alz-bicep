@@ -12,22 +12,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: DEV
+    
+    
     steps:
-
-    - name: Update Az Module & installs Pester
-      run: |
-        Install-Module -Name Az -Force -Scope CurrentUser
-        Update-Module -Name Az -Force -Scope CurrentUser
-        Install-Module -Name Pester -Force -Scope CurrentUser
-      shell: pwsh
-      
     - name: Azure CLI Login
       uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        enable-AzPSSession: true
+        #enable-AzPSSession: true
   
     - name: Azure CLI script
       uses: azure/cli@v2
