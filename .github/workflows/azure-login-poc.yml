@@ -16,7 +16,7 @@ jobs:
 
     - name: Update Az Module & installs Pester
       run: |
-        Update-Module -Name Az -Force -Scope CurrentUser
+        Update-PSResource Az
         Install-Module -Name Pester -Force -Scope CurrentUser
       shell: pwsh
       
