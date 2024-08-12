@@ -13,6 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: DEV
     steps:
+
+    - name: Update Az Module & installs Pester
+      run: |
+        Update-Module -Name Az -Force -Scope CurrentUser
+        Install-Module -Name Pester -Force -Scope CurrentUser
+      shell: pwsh
+      
     - name: Azure CLI Login
       uses: azure/login@v2
       with:
