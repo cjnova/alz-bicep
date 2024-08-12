@@ -28,3 +28,10 @@ jobs:
         inlineScript: |
           az account show
           # You can write your Azure CLI inline scripts here.
+
+    - name: Azure PowerShell script
+      uses: azure/powershell@v2
+      with:
+        azPSVersion: "latest"
+        inlineScript: |
+          Get-AzContext
