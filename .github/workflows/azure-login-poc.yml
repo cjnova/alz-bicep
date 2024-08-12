@@ -9,14 +9,15 @@ permissions:
   contents: read
       
 jobs:
-  test:
+  deploy:
     runs-on: ubuntu-latest
     environment: DEV
     steps:
 
     - name: Update Az Module & installs Pester
       run: |
-        Update-PSResource Az
+        Install-Module -Name Az -Force -Scope CurrentUser
+        Update-Module -Name Az -Force -Scope CurrentUser
         Install-Module -Name Pester -Force -Scope CurrentUser
       shell: pwsh
       
