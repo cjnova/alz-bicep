@@ -727,8 +727,6 @@ try {
         ##############################################################
         # Session Timeouts
         ##############################################################
-        
-        & "C:\AIB\ConfigureSessionTimeoutsV2.ps1" -MaxDisconnectionTime 5 -MaxIdleTime 120 -RemoteAppLogoffTimeLimit 15 -fResetBroken "1"
 
         try {
         # Download the script
