@@ -39,7 +39,6 @@ Param(
         # [string]
         # $ScreenCaptureProtection
 )
-
 function New-Log {
         Param (
                 [Parameter(Mandatory = $true, Position = 0)]
@@ -69,7 +68,7 @@ function Write-Log {
     
         $Date = get-date
         $Content = "[$Date]`t$Category`t`t$Message`n" 
-        Add-Content $Script:Log $content -ErrorAction Stop
+        Add-Content $Script:Log $content -ErrorAction Continue
         If ($Verbose) {
                 Write-Verbose $Content
         }
@@ -80,30 +79,6 @@ function Write-Log {
                         'Warning' { Write-Warning $Content }
                 }
         }
-}
-function Copy-FixFile {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory)]
-        [string] $Source,
-
-        [Parameter(Mandatory)]
-        [string] $Destination
-    )
-
-    if (-not (Test-Path -Path $Source)) {
-        Write-Log -Category 'Warning' -Message "Source not found: $Source"
-        return
-    }
-
-    try {
-        # Always recurse — works for both files and folders
-        Copy-Item -Path $Source -Destination $Destination -Force -Recurse -ErrorAction Stop
-        Write-Log -Category 'Info' -Message "Copied $Source → $Destination"
-    }
-    catch {
-        Write-Log -Category 'Error' -Message "Failed to copy $Source → ${Destination}: $_"
-    }
 }
 function Get-WebFile {
         param(
@@ -212,10 +187,10 @@ function Set-FixedPagefile {
         # Remove any existing pagefile entries on C: and target drive
         foreach ($pf in @("C:\pagefile.sys", "$DriveLetter`:\pagefile.sys")) {
             try {
-                $pagefiles = Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction Stop
+                $pagefiles = Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction Continue
                 foreach ($pf in $pagefiles) {
                         Write-Log -Category 'Info' -Message "Removed existing pagefile entry: $($pf.Name)"
-                        Remove-CimInstance -InputObject $pf -ErrorAction Stop
+                        Remove-CimInstance -InputObject $pf -ErrorAction Continue
                 }
         }
                 catch {
@@ -230,13 +205,12 @@ function Set-FixedPagefile {
             Name        = $pagefilePath
             InitialSize = $InitialSizeMB
             MaximumSize = $MaximumSizeMB
-        } -ErrorAction Stop
+        } -ErrorAction Continue
 
         Write-Log -Message "Pagefile created on ${DriveLetter}: with fixed size $InitialSizeMB MB." -Category 'Info'
     }
     catch {
         Write-Log -Message "Failed to configure pagefile: $_" -Category 'Error'
-        throw
     }
 }
 
@@ -266,12 +240,11 @@ function Install-AVDAgent {
             Get-WebFile -FileName $BootloaderFile -URL $BootloaderUrl
 
             Write-Log -Message "Installing AVD Bootloader" -Category 'Info'
-            Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $BootloaderFile /quiet /qn /norestart /passive" -Wait -ErrorAction Stop
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $BootloaderFile /quiet /qn /norestart /passive" -Wait -ErrorAction Continue
             Write-Log -Message "Installed AVD Bootloader successfully" -Category 'Info'
         }
         catch {
             Write-Log -Message "Failed to install AVD Bootloader: $_" -Category 'Error'
-            throw
         }
 
         Start-Sleep -Seconds 5
@@ -282,19 +255,17 @@ function Install-AVDAgent {
             Get-WebFile -FileName $AgentFile -URL $AgentUrl
 
             Write-Log -Message "Installing AVD Agent" -Category 'Info'
-            Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $AgentFile /quiet /qn /norestart /passive REGISTRATIONTOKEN=$HostPoolRegistrationToken" -Wait -ErrorAction Stop
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $AgentFile /quiet /qn /norestart /passive REGISTRATIONTOKEN=$HostPoolRegistrationToken" -Wait -ErrorAction Continue
             Write-Log -Message "Installed AVD Agent successfully" -Category 'Info'
         }
         catch {
             Write-Log -Message "Failed to install AVD Agent: $_" -Category 'Error'
-            throw
         }
 
         Start-Sleep -Seconds 5
     }
     catch {
         Write-Log -Message "AVD installation process failed: $_" -Category 'Error'
-        throw
     }
 }
 
@@ -316,17 +287,26 @@ function Copy-FixFile {
     }
 
     try {
-        Copy-Item -Path -Source $Source -Destination $Destination -Force -Recurse:$Recurse -ErrorAction Stop
+        # Ensure destination directory exists
+        $destDir = if (Test-Path $Destination -PathType Container) { $Destination } else { Split-Path -Path $Destination -Parent }
+        if ($destDir -and -not (Test-Path $destDir)) {
+            New-Item -Path $destDir -ItemType Directory -Force | Out-Null
+        }
+
+        # FIX: correct parameter usage (remove stray '-Path -Source')
+        Copy-Item -Path $Source -Destination $Destination -Force -Recurse:$Recurse -ErrorAction Continue
         Write-Log -Message "Copied $Source → $Destination" -Category 'Info'
     }
     catch {
-        Write-Log -Path $LogPath -Message "Failed to copy $Source → ${Destination}: $_" -Category 'Error'
+        # FIX: remove unsupported '-Path' argument
+        Write-Log -Category 'Error' -Message "Failed to copy $Source → ${Destination}: $($_.Exception.Message)"
     }
 }
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $Script:Name = 'Set-SessionHostConfiguration'
 New-Log -Path (Join-Path -Path $env:SystemRoot -ChildPath 'Logs')
+
 try {
 
         ##############################################################
@@ -624,23 +604,27 @@ try {
         # Add Defender Exclusions for FSLogix 
         ##############################################################
         # https://docs.microsoft.com/en-us/azure/architecture/example-scenario/wvd/windows-virtual-desktop-fslogix#antivirus-exclusions
-        if ($Fslogix -eq 'false') {
-
-                $Files = @(
-                        "%ProgramFiles%\FSLogix\Apps\frxdrv.sys",
-                        "%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys",
-                        "%ProgramFiles%\FSLogix\Apps\frxccd.sys",
-                        "%TEMP%\*.VHD",
-                        "%TEMP%\*.VHDX",
-                        "%Windir%\TEMP\*.VHD",
-                        "%Windir%\TEMP\*.VHDX",
-                        "$FslogixFileShareName\*.VHD",
-                        "$FslogixFileShareName\*.VHDX",
-                        "%ProgramFiles%\Epic",
-                        "$env:LOCALAPPDATA\Hyperdrive",
-                        "$env:LOCALAPPDATA\Hyperdrive\EBWebView",
-                        "$env:PROGRAMDATA\HyperdriveTempData"
+        if ($Fslogix -eq 'false') {        
+                $files = @(
+                "%ProgramFiles%\FSLogix\Apps\frxdrv.sys",
+                "%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys",
+                "%ProgramFiles%\FSLogix\Apps\frxccd.sys",
+                "%TEMP%\*.VHD",
+                "%TEMP%\*.VHDX",
+                "%Windir%\TEMP\*.VHD",
+                "%Windir%\TEMP\*.VHDX",
+                "%ProgramFiles%\Epic",
+                "$env:LOCALAPPDATA\Hyperdrive",
+                "$env:LOCALAPPDATA\Hyperdrive\EBWebView",
+                "$env:PROGRAMDATA\HyperdriveTempData"
                 )
+
+                if (![string]::IsNullOrWhiteSpace($FSLogixFileShare)) {
+                $files += @(
+                                (Join-Path $FSLogixFileShare '*.VHD'),
+                                (Join-Path $FSLogixFileShare '*.VHDX')
+                        )
+                }
 
                 foreach ($File in $Files) {
                         Add-MpPreference -ExclusionPath $File
@@ -672,13 +656,20 @@ try {
         #  Language and region settings applied
         ##############################################################
         
-        Set-WinUILanguageOverride -Language fi-FI
-        Set-WinUserLanguageList fi-FI -Force
-        Set-WinSystemLocale fi-FI
-        Set-Culture fi-FI
-        Set-WinHomeLocation -GeoId 77
-        Copy-UserInternationalSettingsToSystem -WelcomeScreen $False -NewUser $True
-        Write-Log -Message 'Language, locales, culture and region configured' -Category 'Info'
+
+        # Language & region        
+        
+        try {
+                Set-WinUILanguageOverride -Language fi-FI
+                Set-WinUserLanguageList fi-FI -Force
+                Set-WinSystemLocale fi-FI
+                Set-Culture fi-FI
+                Set-WinHomeLocation -GeoId 77
+                Copy-UserInternationalSettingsToSystem -WelcomeScreen $False -NewUser $True
+        }
+        catch {
+                Write-Log -Category 'Error' -Message "Language and region configuration failed: $($_.Exception.Message)"
+        }
 
 
         # ----------------------------------------------
@@ -736,9 +727,20 @@ try {
         ##############################################################
         # Session Timeouts
         ##############################################################
-        New-Item -ItemType Directory -Force -Path "C:\AIB"
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2024-03-27/ConfigureSessionTimeoutsV2.ps1" -OutFile "C:\AIB\ConfigureSessionTimeoutsV2.ps1"
+        
         & "C:\AIB\ConfigureSessionTimeoutsV2.ps1" -MaxDisconnectionTime 5 -MaxIdleTime 120 -RemoteAppLogoffTimeLimit 15 -fResetBroken "1"
+
+        try {
+        # Download the script
+                Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2024-03-27/ConfigureSessionTimeoutsV2.ps1" -OutFile "C:\AIB\ConfigureSessionTimeoutsV2.ps1"
+
+        # Invoke the script with parameters
+                & "C:\AIB\WindowsOptimization.ps1" -Optimizations "WindowsMediaPlayer","DefaultUserSettings","Autologgers","Services"
+        }
+        catch {
+        # Log the error without propagating it
+                Write-Log -Category 'Error' -Message "WindowsOptimization.ps1 failed: $($_.Exception.Message)"
+        }
 
         ##############################################################
         # Edge hardening
@@ -791,9 +793,19 @@ try {
         ##############################################################
         # Windows Optimizations
         ##############################################################
-        New-Item -ItemType Directory -Force -Path "C:\AIB"
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2024-03-27/WindowsOptimization.ps1" -OutFile "C:\AIB\WindowsOptimization.ps1"
-        & "C:\AIB\WindowsOptimization.ps1" -Optimizations "WindowsMediaPlayer","DefaultUserSettings","Autologgers","Services"      
+
+        try {
+        # Download the script
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2024-03-27/WindowsOptimization.ps1" `
+                        -OutFile "C:\AIB\WindowsOptimization.ps1"
+
+        # Invoke the script with parameters
+        & "C:\AIB\WindowsOptimization.ps1" -Optimizations "WindowsMediaPlayer","DefaultUserSettings","Autologgers","Services"
+        }
+        catch {
+        # Log the error without propagating it
+        Write-Log -Category 'Error' -Message "WindowsOptimization.ps1 failed: $($_.Exception.Message)"
+        }
 
         ##############################################################
         # File Updater & cleanup
@@ -808,7 +820,7 @@ try {
 
         foreach ($fix in $fixes) {
         Write-Log -Category 'Info' -Message "Applying fix for Issue $($fix.Issue): $($fix.Description)"
-        Copy-FixFile -Source $fix.Source -Destination $fix.Destination
+        Copy-FixFile -Source $fix.Source -Destination $fix.Destination -Recurse
         }
 
 <#         # Clean up
@@ -836,8 +848,8 @@ try {
         #  Restart VM
         ##############################################################
         Restart-Computer -Force -Delay 30 
+        exit 0
 }
 catch {
         Write-Log -Message $_ -Category 'Error'
-        throw
 }
