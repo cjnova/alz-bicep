@@ -733,11 +733,11 @@ try {
                 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2024-03-27/ConfigureSessionTimeoutsV2.ps1" -OutFile "C:\AIB\ConfigureSessionTimeoutsV2.ps1"
 
         # Invoke the script with parameters
-                & "C:\AIB\WindowsOptimization.ps1" -Optimizations "WindowsMediaPlayer","DefaultUserSettings","Autologgers","Services"
+                & "C:\AIB\ConfigureSessionTimeoutsV2.ps1" -MaxDisconnectionTime 5 -MaxIdleTime 120 -RemoteAppLogoffTimeLimit 15 -fResetBroken "1"
         }
         catch {
         # Log the error without propagating it
-                Write-Log -Category 'Error' -Message "WindowsOptimization.ps1 failed: $($_.Exception.Message)"
+                Write-Log -Category 'Error' -Message "ConfigureSessionTimeoutsV2.ps1: $($_.Exception.Message)"
         }
 
         ##############################################################
