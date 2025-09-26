@@ -58,7 +58,6 @@ function New-Log {
     
         Add-Content $script:Log "Date`t`t`tCategory`t`tDetails"
 }
-
 function Write-Log {
         Param (
                 [Parameter(Mandatory = $false, Position = 0)]
@@ -82,7 +81,30 @@ function Write-Log {
                 }
         }
 }
+function Copy-FixFile {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string] $Source,
 
+        [Parameter(Mandatory)]
+        [string] $Destination
+    )
+
+    if (-not (Test-Path -Path $Source)) {
+        Write-Log -Category 'Warning' -Message "Source not found: $Source"
+        return
+    }
+
+    try {
+        # Always recurse — works for both files and folders
+        Copy-Item -Path $Source -Destination $Destination -Force -Recurse -ErrorAction Stop
+        Write-Log -Category 'Info' -Message "Copied $Source → $Destination"
+    }
+    catch {
+        Write-Log -Category 'Error' -Message "Failed to copy $Source → ${Destination}: $_"
+    }
+}
 function Get-WebFile {
         param(
                 [parameter(Mandatory)]
@@ -166,6 +188,141 @@ function Set-ListPolicy($baseKey, [string[]]$items) {
 function New-EdgeKey($path) {
         if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
         }
+
+function Set-FixedPagefile {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Z]$')]
+        [string] $DriveLetter,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(256, 65536)]
+        [uint32] $InitialSizeMB,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(256, 65536)]
+        [uint32] $MaximumSizeMB
+    )
+
+    try {
+        Write-Log -Message "Disabling automatic pagefile.sys management" -Category 'Info'
+        Set-CimInstance -Query "SELECT * FROM Win32_ComputerSystem" -Property @{ AutomaticManagedPagefile = $false }
+
+        # Remove any existing pagefile entries on C: and target drive
+        foreach ($pf in @("C:\pagefile.sys", "$DriveLetter`:\pagefile.sys")) {
+            try {
+                $pagefiles = Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction Stop
+                foreach ($pf in $pagefiles) {
+                        Write-Log -Category 'Info' -Message "Removed existing pagefile entry: $($pf.Name)"
+                        Remove-CimInstance -InputObject $pf -ErrorAction Stop
+                }
+        }
+                catch {
+                Write-Log -Category 'Error' -Message "Failed to query or remove pagefile settings: $_"
+                }
+
+        }
+
+        # Create new fixed-size pagefile
+        $pagefilePath = "$DriveLetter`:\pagefile.sys"
+        New-CimInstance -ClassName Win32_PageFileSetting -Property @{
+            Name        = $pagefilePath
+            InitialSize = $InitialSizeMB
+            MaximumSize = $MaximumSizeMB
+        } -ErrorAction Stop
+
+        Write-Log -Message "Pagefile created on ${DriveLetter}: with fixed size $InitialSizeMB MB." -Category 'Info'
+    }
+    catch {
+        Write-Log -Message "Failed to configure pagefile: $_" -Category 'Error'
+        throw
+    }
+}
+
+function Install-AVDAgent {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string] $HostPoolRegistrationToken,
+
+        [Parameter()]
+        [string] $BootloaderUrl = 'https://go.microsoft.com/fwlink/?linkid=2311028',
+
+        [Parameter()]
+        [string] $AgentUrl = 'https://go.microsoft.com/fwlink/?linkid=2310011',
+
+        [Parameter()]
+        [string] $BootloaderFile = 'AVD-Bootloader.msi',
+
+        [Parameter()]
+        [string] $AgentFile = 'AVD-Agent.msi'
+    )
+
+    try {
+        # Descargar e instalar Bootloader
+        try {
+            Write-Log -Message "Downloading AVD Bootloader from $BootloaderUrl" -Category 'Info'
+            Get-WebFile -FileName $BootloaderFile -URL $BootloaderUrl
+
+            Write-Log -Message "Installing AVD Bootloader" -Category 'Info'
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $BootloaderFile /quiet /qn /norestart /passive" -Wait -ErrorAction Stop
+            Write-Log -Message "Installed AVD Bootloader successfully" -Category 'Info'
+        }
+        catch {
+            Write-Log -Message "Failed to install AVD Bootloader: $_" -Category 'Error'
+            throw
+        }
+
+        Start-Sleep -Seconds 5
+
+        # Descargar e instalar Agent
+        try {
+            Write-Log -Message "Downloading AVD Agent from $AgentUrl" -Category 'Info'
+            Get-WebFile -FileName $AgentFile -URL $AgentUrl
+
+            Write-Log -Message "Installing AVD Agent" -Category 'Info'
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $AgentFile /quiet /qn /norestart /passive REGISTRATIONTOKEN=$HostPoolRegistrationToken" -Wait -ErrorAction Stop
+            Write-Log -Message "Installed AVD Agent successfully" -Category 'Info'
+        }
+        catch {
+            Write-Log -Message "Failed to install AVD Agent: $_" -Category 'Error'
+            throw
+        }
+
+        Start-Sleep -Seconds 5
+    }
+    catch {
+        Write-Log -Message "AVD installation process failed: $_" -Category 'Error'
+        throw
+    }
+}
+
+function Copy-FixFile {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string] $Source,
+
+        [Parameter(Mandatory)]
+        [string] $Destination,
+
+        [switch] $Recurse
+    )
+
+    if (-not (Test-Path -Path $Source)) {
+        Write-Log -Message "Source not found: $Source" -Category 'Warning'
+        return
+    }
+
+    try {
+        Copy-Item -Path -Source $Source -Destination $Destination -Force -Recurse:$Recurse -ErrorAction Stop
+        Write-Log -Message "Copied $Source → $Destination" -Category 'Info'
+    }
+    catch {
+        Write-Log -Path $LogPath -Message "Failed to copy $Source → ${Destination}: $_" -Category 'Error'
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 $Script:Name = 'Set-SessionHostConfiguration'
@@ -588,7 +745,6 @@ try {
         ##############################################################
 
         $edgeReg = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
-        $edgePolicyReg = 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
 
         Write-Log -Message "Applying Edge hardening to $edgeReg" -Category 'Info'
 
@@ -619,7 +775,18 @@ try {
         foreach ($setting in $edgeSettings) {
         Set-RegistryValue -Path $edgeReg -Name $setting.Name -PropertyType $setting.PropertyType -Value $setting.Value
         }
-        New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' -Name 'Update {56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}' -PropertyType DWord -Value 0 -Force
+
+        try {
+        Set-RegistryValue `
+                -Name 'Update {56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}' `
+                -Path 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' `
+                -PropertyType DWord `
+                -Value 0
+        Write-Log -Category 'Info' -Message "Edge auto-update policy applied successfully."
+        }
+        catch {
+        Write-Log -Category 'Error' -Message "Failed to set Edge auto-update policy: $_"
+        }
 
         ##############################################################
         # Windows Optimizations
@@ -631,30 +798,18 @@ try {
         ##############################################################
         # File Updater & cleanup
         ##############################################################
-        #Issue 27: Copy Config.json for Epic Hyperdrive
-        $sourceItem = "C:\AIB\software\Hyperdrive\Epic Hyperdrive Setup 100.2508.0\491Config.json"
-        $targetFolder = "C:\Program Files (x86)\Epic\Hyperdrive\Config"
-        Copy-Item -Path $sourceItem -Destination $targetFolder -Force
+ 
+        $fixes = @(
+        [PSCustomObject]@{ Issue = 27; Description = "Epic Hyperdrive Config"; Source = "C:\AIB\software\Hyperdrive\Epic Hyperdrive Setup 100.2508.0\491Config.json"; Destination = "C:\Program Files (x86)\Epic\Hyperdrive\Config" },
+        [PSCustomObject]@{ Issue = 25; Description = "FileZilla config"; Source = "C:\AIB\software\FileZilla\fzdefaults.xml"; Destination = "C:\Program Files\FileZilla FTP Client" },
+        [PSCustomObject]@{ Issue = 1; Description = "Hyperdrive bat script"; Source = "C:\AIB\software\LastConfigurations\Hyperdrive"; Destination = "C:\Sovellukset" },
+        [PSCustomObject]@{ Issue = 1; Description = "Edge-Apotti-tukiportaali"; Source = "C:\AIB\software\LastConfigurations\tukiportaali"; Destination = "C:\Sovellukset" }
+        )
 
-        #Issue 25: Copy FileZilla configuration file
-        $sourceItem = "C:\AIB\software\FileZilla\fzdefaults.xml"
-        $targetFolder = "C:\Program Files\FileZilla FTP Client"
-        Copy-Item -Path $sourceItem -Destination $targetFolder -Force
-
-        # Issue 1
-        New-Item -ItemType Directory -Force -Path C:\\Sovellukset\Hyperdrive
-        New-Item -ItemType Directory -Force -Path C:\\Sovellukset\tukiportaali
-
-        $sourceFolderHyperdriveBatScript = "C:\AIB\\software\\LastConfigurations\\Hyperdrive"
-        $targetFolderHyperdriveBatScript = "C:\Sovellukset"
-        Copy-Item -Path $sourceFolderHyperdriveBatScript -Destination $targetFolderHyperdriveBatScript -Recurse -Force
-        Write-Log -Message "HyperdriveBatScript copied successfully" -Category 'Info'
-
-        $sourceFolderTukiportaali = "C:\AIB\software\\LastConfigurations\\tukiportaali"
-        $targetFolderTukiportaali = "C:\Sovellukset"
-        Copy-Item -Path $sourceFolderTukiportaali -Destination $targetFolderTukiportaali -Recurse -Force
-        Write-Log -Message "Edge-Apotti-tukiportaali copied successfully" -Category 'Info'
-
+        foreach ($fix in $fixes) {
+        Write-Log -Category 'Info' -Message "Applying fix for Issue $($fix.Issue): $($fix.Description)"
+        Copy-FixFile -Source $fix.Source -Destination $fix.Destination
+        }
 
 <#         # Clean up
         $pathsToClean = "C:\\AIB"
@@ -668,51 +823,19 @@ try {
         # Fixed pagefile on D: and remove any on C:
         ##############################################################
 
-        # Disable automatic management
-        Write-Log -Message "Disabling automatic pagefile.sys management" -Category 'Info'
-        
-        Set-CimInstance -Query "SELECT * FROM Win32_ComputerSystem" -Property @{ AutomaticManagedPagefile = $false }
-
-        # Remove any pagefile entry on C:
-        Get-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE Name='C:\\pagefile.sys'" | Remove-CimInstance -ErrorAction SilentlyContinue
-
-        # Remove any existing pagefile entry on D:
-        Get-CimInstance -Query "SELECT * FROM Win32_PageFileSetting WHERE Name='D:\\pagefile.sys'" | Remove-CimInstance -ErrorAction SilentlyContinue
-
-        # Create new fixed-size pagefile on D:
-        $initialSizeMB = [uint32]10240
-        $maxSizeMB     = [uint32]10240
-
-        New-CimInstance -ClassName Win32_PageFileSetting -Property @{
-                Name        = "D:\\pagefile.sys"
-                InitialSize = $initialSizeMB
-                MaximumSize = $maxSizeMB
-        }
-
-        Write-Log -Message "Pagefile created on D: with fixed size $initialSizeMB MB." -Category 'Info'
-#>
+        Set-FixedPagefile -DriveLetter 'D' -InitialSizeMB 10240 -MaximumSizeMB 10240
 
         ##############################################################
         #  Install the AVD Agent
         ##############################################################
-        $BootInstaller = 'AVD-Bootloader.msi'
-        Get-WebFile -FileName $BootInstaller -URL 'https://go.microsoft.com/fwlink/?linkid=2311028'
-        Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $BootInstaller /quiet /qn /norestart /passive" -Wait -Passthru
-        Write-Log -Message 'Installed AVD Bootloader' -Category 'Info'
-        Start-Sleep -Seconds 5
 
-        $AgentInstaller = 'AVD-Agent.msi'
-        Get-WebFile -FileName $AgentInstaller -URL 'https://go.microsoft.com/fwlink/?linkid=2310011'
-        Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i $AgentInstaller /quiet /qn /norestart /passive REGISTRATIONTOKEN=$HostPoolRegistrationToken" -Wait -PassThru
-        Write-Log -Message 'Installed AVD Agent' -Category 'Info'
-        Start-Sleep -Seconds 5
+        Install-AVDAgent -HostPoolRegistrationToken $HostPoolRegistrationToken
+        
 
         ##############################################################
         #  Restart VM
         ##############################################################
-        if ($IdentityServiceProvider -eq "EntraIDKerberos" -and $AmdVmSize -eq 'false' -and $NvidiaVmSize -eq 'false') {
-                Start-Process -FilePath 'shutdown' -ArgumentList '/r /t 30'
-        }
+        Restart-Computer -Force -Delay 30 
 }
 catch {
         Write-Log -Message $_ -Category 'Error'
