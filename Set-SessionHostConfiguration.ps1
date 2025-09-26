@@ -813,7 +813,8 @@ try {
         [PSCustomObject]@{ Issue = 27; Description = "Epic Hyperdrive Config"; Source = "C:\AIB\software\Hyperdrive\Epic Hyperdrive Setup 100.2508.0\491Config.json"; Destination = "C:\Program Files (x86)\Epic\Hyperdrive\Config" },
         [PSCustomObject]@{ Issue = 25; Description = "FileZilla config"; Source = "C:\AIB\software\FileZilla\fzdefaults.xml"; Destination = "C:\Program Files\FileZilla FTP Client" },
         [PSCustomObject]@{ Issue = 1; Description = "Hyperdrive bat script"; Source = "C:\AIB\software\LastConfigurations\Hyperdrive"; Destination = "C:\Sovellukset" },
-        [PSCustomObject]@{ Issue = 1; Description = "Edge-Apotti-tukiportaali"; Source = "C:\AIB\software\LastConfigurations\tukiportaali"; Destination = "C:\Sovellukset" }
+        [PSCustomObject]@{ Issue = 1; Description = "Edge-Apotti-tukiportaali"; Source = "C:\AIB\software\LastConfigurations\tukiportaali"; Destination = "C:\Sovellukset" },
+        [PSCustomObject]@{ Issue = 21; Description = "PuTTY configuration files + registy entries"; Source = "C:\AIB\software\PuTTy"; Destination = "C:\Sovellukset\PuTTY" }
         )
 
         foreach ($fix in $fixes) {
@@ -833,7 +834,7 @@ try {
         # Fixed pagefile on D: and remove any on C:
         ##############################################################
 
-        Set-FixedPagefile -DriveLetter 'D' -InitialSizeMB 10240 -MaximumSizeMB 10240
+        # Set-FixedPagefile -DriveLetter 'D' -InitialSizeMB 10240 -MaximumSizeMB 10240
 
         ##############################################################
         #  Install the AVD Agent
