@@ -164,50 +164,31 @@ function New-EdgeKey($path) {
         if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
         }
 
-function Set-FixedPagefile {
+function Set-FixedPagefileSize {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [ValidatePattern('^[A-Z]$')]
-        [string] $DriveLetter,
-
-        [Parameter(Mandatory)]
-        [ValidateRange(256, 65536)]
-        [uint32] $InitialSizeMB,
-
-        [Parameter(Mandatory)]
-        [ValidateRange(256, 65536)]
-        [uint32] $MaximumSizeMB
+        [int]$SizeMB
     )
 
     try {
-        Write-Log -Message "Disabling automatic pagefile.sys management" -Category 'Info'
+        # Disable automatic management
         Set-CimInstance -Query "SELECT * FROM Win32_ComputerSystem" -Property @{ AutomaticManagedPagefile = $false }
 
-        # Remove any existing pagefile entries on C: and target drive
-        foreach ($pf in @("C:\pagefile.sys", "$DriveLetter`:\pagefile.sys")) {
-            try {
-                $pagefiles = Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction Continue
-                foreach ($pf in $pagefiles) {
-                        Write-Log -Category 'Info' -Message "Removed existing pagefile entry: $($pf.Name)"
-                        Remove-CimInstance -InputObject $pf -ErrorAction Continue
-                }
+        # Read current PagingFiles entry (keeps existing drive letter)
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"
+        $current = (Get-ItemProperty -Path $regPath -Name PagingFiles).PagingFiles
+
+        if ($current -match '^[A-Z]:\\pagefile\.sys') {
+            $drive = $current.Substring(0,2)  # e.g. "C:" or "D:"
+            $newValue = "$drive\pagefile.sys $SizeMB $SizeMB"
+
+            Set-ItemProperty -Path $regPath -Name PagingFiles -Value $newValue
+            Write-Log -Message "Pagefile size set to $SizeMB MB on $drive" -Category 'Information'
         }
-                catch {
-                Write-Log -Category 'Error' -Message "Failed to query or remove pagefile settings: $_"
-                }
-
+        else {
+            Write-Log -Message "No existing pagefile entry found to update." -Category 'Warning'
         }
-
-        # Create new fixed-size pagefile
-        $pagefilePath = "$DriveLetter`:\pagefile.sys"
-        New-CimInstance -ClassName Win32_PageFileSetting -Property @{
-            Name        = $pagefilePath
-            InitialSize = $InitialSizeMB
-            MaximumSize = $MaximumSizeMB
-        } -ErrorAction Continue
-
-        Write-Log -Message "Pagefile created on ${DriveLetter}: with fixed size $InitialSizeMB MB." -Category 'Info'
     }
     catch {
         Write-Log -Message "Failed to configure pagefile: $_" -Category 'Error'
@@ -834,21 +815,21 @@ try {
         # Fixed pagefile on D: and remove any on C:
         ##############################################################
 
-        # Set-FixedPagefile -DriveLetter 'D' -InitialSizeMB 10240 -MaximumSizeMB 10240
+        Set-FixedPagefileSize -SizeMB 10240  # Sets pagefile to 10 GB
 
         ##############################################################
         #  Install the AVD Agent
         ##############################################################
 
         Install-AVDAgent -HostPoolRegistrationToken $HostPoolRegistrationToken
-        
 
         ##############################################################
         #  Restart VM
         ##############################################################
-        Restart-Computer -Force -Delay 30 
+        Start-Process -FilePath 'shutdown' -ArgumentList '/r /t 30'
         exit 0
 }
 catch {
         Write-Log -Message $_ -Category 'Error'
 }
+
