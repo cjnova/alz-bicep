@@ -31,5 +31,4 @@ function Set-FixedPagefileSize {
 }
 
 Set-FixedPagefileSize -SizeMB 10240  # Sets pagefile to 10 GB
-Restart-Computer -Force -Delay 30 
-exit 0
+Restart-Computer -Force -Delay 30
