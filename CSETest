@@ -1,0 +1,33 @@
+function Set-FixedPagefileSize {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [int]$SizeMB
+    )
+
+    try {
+        # Disable automatic management
+        Set-CimInstance -Query "SELECT * FROM Win32_ComputerSystem" -Property @{ AutomaticManagedPagefile = $false }
+
+        # Read current PagingFiles entry (keeps existing drive letter)
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"
+        $current = (Get-ItemProperty -Path $regPath -Name PagingFiles).PagingFiles
+
+        if ($current -match '^[A-Z]:\\pagefile\.sys') {
+            $drive = $current.Substring(0,2)  # e.g. "C:" or "D:"
+            $newValue = "$drive\pagefile.sys $SizeMB $SizeMB"
+
+            Set-ItemProperty -Path $regPath -Name PagingFiles -Value $newValue
+
+            Write-Output "Pagefile fixed at $SizeMB MB on $drive"
+        }
+        else {
+            Write-Output "No existing pagefile entry found to update."
+        }
+    }
+    catch {
+        Write-Output "Failed to configure pagefile: $_"
+    }
+}
+
+Set-FixedPagefileSize -SizeMB 10240  # Sets pagefile to 10 GB
