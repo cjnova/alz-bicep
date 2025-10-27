@@ -2,45 +2,155 @@
 package_update: false
 package_upgrade: false
 
+# Set timezone
 timezone: Europe/Madrid
 
 write_files:
-  - path: /opt/bootstrap-network.sh
+  - path: /opt/net-resilience/Run-OnPremTests.ps1
     permissions: '0755'
     content: |
-      #!/bin/bash
-      echo "[BOOTSTRAP] Starting network setup..."
-      # Example: set static DNS
-      echo "nameserver 8.8.8.8" > /etc/resolv.conf
-      # Example: add static route
-      ip route add 10.0.0.0/16 via 192.168.1.1
-      # Add your actual logic here
-      echo "[BOOTSTRAP] Network setup complete."
+      param(
+      [int]$IntervalSec = 10,
+      [string]$LogDir = "/var/log/net-resilience"
+      )
+
+      # Ensure log directory exists
+      if (-not (Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+      }
+
+      # Detect region and zone from IMDS
+      $env:HTTP_PROXY = ""
+      $env:HTTPS_PROXY = ""
+      $headers = @{ Metadata = "true" }
+
+      try {
+        $instance = Invoke-RestMethod -Headers $headers -Uri "http://169.254.169.254/metadata/instance?api-version=2025-04-07"
+        $env:AZ_LOCATION = $instance.compute.location
+        $env:AZ_ZONE     = $instance.compute.zone
+      } catch {
+        $env:AZ_LOCATION = "unknown"
+        $env:AZ_ZONE     = "unknown"
+        Write-Error "IMDS query failed: $($_.Exception.Message)"
+      }
+
+      $instanceId = (hostname)
+
+      function Write-EventJson([hashtable]$h) {
+        $line = ($h | ConvertTo-Json -Compress)
+        $date = (Get-Date -Format 'yyyy-MM-dd')
+        $file = Join-Path $LogDir "net-$date.jsonl"
+        Add-Content -Path $file -Value $line
+      }
+
+      # Define on-prem targets
+      $targets = @(
+        @{ Host = "8.8.8.8"; Protocol = "ICMP" },
+        @{ Host = "8.8.8.8"; Protocol = "HTTP"; Url = "https://8.8.8.8" }
+      )
+
+      while ($true) {
+        $ts = (Get-Date).ToString("o")
+
+        foreach ($target in $targets) {
+          $cid = [guid]::NewGuid()
+
+          if ($target.Protocol -eq "ICMP") {
+            try {
+              $pingResult = Test-Connection -ComputerName $target.Host -Count 1 -ErrorAction Stop
+              $latency = $pingResult.ResponseTime
+              Write-EventJson @{
+                TimeGenerated = $ts; AzLocation = $env:AZ_LOCATION; AzZone = $env:AZ_ZONE; VmInstance = $instanceId
+                TestType = 'OnPrem'; Target = $target.Host; Protocol = 'ICMP'; LatencyMs = $latency
+                Success = $true; StatusCode = 'Reply'; Error = $null; CorrelationId = $cid
+              }
+            } catch {
+              Write-EventJson @{
+                TimeGenerated = $ts; AzLocation = $env:AZ_LOCATION; AzZone = $env:AZ_ZONE; VmInstance = $instanceId
+                TestType = 'OnPrem'; Target = $target.Host; Protocol = 'ICMP'; LatencyMs = $null
+                Success = $false; StatusCode = 'Timeout'; Error = $_.Exception.Message; CorrelationId = $cid
+              }
+            }
+          }
+
+          if ($target.Protocol -eq "HTTP") {
+            try {
+              $sw = [System.Diagnostics.Stopwatch]::StartNew()
+              $resp = Invoke-WebRequest -Uri $target.Url -TimeoutSec 10 -UseBasicParsing
+              $sw.Stop()
+              Write-EventJson @{
+                TimeGenerated = $ts; AzLocation = $env:AZ_LOCATION; AzZone = $env:AZ_ZONE; VmInstance = $instanceId
+                TestType = 'OnPrem'; Target = $target.Url; Protocol = 'HTTP'; LatencyMs = $sw.ElapsedMilliseconds
+                Success = ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400)
+                StatusCode = "$($resp.StatusCode)"; Error = $null; CorrelationId = $cid
+              }
+            } catch {
+              Write-EventJson @{
+                TimeGenerated = $ts; AzLocation = $env:AZ_LOCATION; AzZone = $env:AZ_ZONE; VmInstance = $instanceId
+                TestType = 'OnPrem'; Target = $target.Url; Protocol = 'HTTP'; LatencyMs = $null
+                Success = $false; StatusCode = 'ERROR'; Error = $_.Exception.Message; CorrelationId = $cid
+              }
+            }
+          }
+        }
+
+        Start-Sleep -Seconds $IntervalSec
+      }
+
+  # Logrotate config for AMA-safe rotation
+  - path: /etc/logrotate.d/net-resilience
+    permissions: '0644'
+    content: |
+      /var/log/net-resilience/net-*.jsonl {
+          daily
+          rotate 14
+          missingok
+          notifempty
+          copytruncate
+          compress
+          delaycompress
+          dateext
+          dateformat -%Y%m%d
+          su root root
+      }
 
 runcmd:
-  # Step 1: Run network bootstrap
-  - /opt/bootstrap-network.sh
-
-  # Step 2: Update and install packages
+  # Step 1: Update and install packages
   - apt-get update
   - apt-get upgrade -y
   - apt-get install -y curl jq unzip ca-certificates net-tools iputils-ping dnsutils wget apt-transport-https software-properties-common
 
-  # Step 3: Install PowerShell 7
-  - |
-    wget -q https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
-    dpkg -i packages-microsoft-prod.deb
-    apt-get update && apt-get install -y powershell
+  # Step 2: Install PowerShell 7
+  - wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+  - dpkg -i packages-microsoft-prod.deb
+  - apt-get update && apt-get install -y powershell
 
-  # Step 4: Install Azure Monitor Agent (AMA)
-  - |
-    wget -O /tmp/azuremonitoragent.deb https://aka.ms/azuremonitoragentlinux
-    dpkg -i /tmp/azuremonitoragent.deb || apt-get -f install -y
+  # Step 3: Install Azure Monitor Agent (AMA)
+  - wget -O /tmp/azuremonitoragent.deb https://aka.ms/azuremonitoragentlinux
+  - dpkg -i /tmp/azuremonitoragent.deb || apt-get -f install -y
 
-  # Step 5: Create directories and fetch test suite
-  - mkdir -p /opt/net-resilience/scripts /var/log/net-resilience
-  - |
-    curl -fsSL "https://<storage-account>.blob.core.windows.net/artifacts/net-tests.zip?<SAS>" -o /opt/net-resilience/net-tests.zip
-    unzip -o /opt/net-resilience/net-tests.zip -d /opt/net-resilience/scripts
+  # Step 4: Create log directory
+  - mkdir -p /var/log/net-resilience
 
-  # Step 6: (systemd service/timer setup goes here)
+  # Step 5: Create systemd service only (no timer)
+  - |
+    cat >/etc/systemd/system/onprem-tests.service <<'EOF'
+    [Unit]
+    Description=On-Prem Connectivity Test Runner
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    WorkingDirectory=/opt/net-resilience
+    ExecStart=/usr/bin/pwsh -File /opt/net-resilience/Run-OnPremTests.ps1
+    Restart=on-failure
+    RestartSec=10
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+    systemctl daemon-reload
+    # Service is installed but not enabled/started by default
+    systemctl disable onprem-tests.service
+    systemctl stop onprem-tests.service
