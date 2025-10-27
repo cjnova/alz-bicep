@@ -1,0 +1,46 @@
+#cloud-config
+package_update: false
+package_upgrade: false
+
+timezone: Europe/Madrid
+
+write_files:
+  - path: /opt/bootstrap-network.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "[BOOTSTRAP] Starting network setup..."
+      # Example: set static DNS
+      echo "nameserver 8.8.8.8" > /etc/resolv.conf
+      # Example: add static route
+      ip route add 10.0.0.0/16 via 192.168.1.1
+      # Add your actual logic here
+      echo "[BOOTSTRAP] Network setup complete."
+
+runcmd:
+  # Step 1: Run network bootstrap
+  - /opt/bootstrap-network.sh
+
+  # Step 2: Update and install packages
+  - apt-get update
+  - apt-get upgrade -y
+  - apt-get install -y curl jq unzip ca-certificates net-tools iputils-ping dnsutils wget apt-transport-https software-properties-common
+
+  # Step 3: Install PowerShell 7
+  - |
+    wget -q https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
+    dpkg -i packages-microsoft-prod.deb
+    apt-get update && apt-get install -y powershell
+
+  # Step 4: Install Azure Monitor Agent (AMA)
+  - |
+    wget -O /tmp/azuremonitoragent.deb https://aka.ms/azuremonitoragentlinux
+    dpkg -i /tmp/azuremonitoragent.deb || apt-get -f install -y
+
+  # Step 5: Create directories and fetch test suite
+  - mkdir -p /opt/net-resilience/scripts /var/log/net-resilience
+  - |
+    curl -fsSL "https://<storage-account>.blob.core.windows.net/artifacts/net-tests.zip?<SAS>" -o /opt/net-resilience/net-tests.zip
+    unzip -o /opt/net-resilience/net-tests.zip -d /opt/net-resilience/scripts
+
+  # Step 6: (systemd service/timer setup goes here)
