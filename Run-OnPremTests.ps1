@@ -62,7 +62,7 @@ while ($true) {
     if ($target.Protocol -eq "HTTP") {
       try {
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $resp = Invoke-WebRequest -Uri $target.Url -TimeoutSec 10
+        $resp = Invoke-WebRequest -Uri $target.Url -TimeoutSec 10 -UseBasicParsing
         $sw.Stop()
         Write-EventJson @{
           TimeGenerated = $ts; AzLocation = $env:AZ_LOCATION; AzZone = $env:AZ_ZONE; VmInstance = $instanceId
