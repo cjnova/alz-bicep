@@ -9,15 +9,18 @@ if (-not (Test-Path $LogDir)) {
 }
 
 # Detect region and zone from IMDS
+$env:HTTP_PROXY = ""
+$env:HTTPS_PROXY = ""
+$headers = @{ Metadata = "true" }
+
 try {
-  $headers = @{ Metadata = "true" }
-  $location = Invoke-RestMethod -Headers $headers -Uri "http://169.254.169.254/metadata/instance/compute/location?api-version=2021-02-01"
-  $zone     = Invoke-RestMethod -Headers $headers -Uri "http://169.254.169.254/metadata/instance/compute/zone?api-version=2021-02-01"
-  $env:AZ_LOCATION = $location
-  $env:AZ_ZONE     = $zone
+  $instance = Invoke-RestMethod -Headers $headers -Uri "http://169.254.169.254/metadata/instance?api-version=2025-04-07"
+  $env:AZ_LOCATION = $instance.compute.location
+  $env:AZ_ZONE     = $instance.compute.zone
 } catch {
   $env:AZ_LOCATION = "unknown"
   $env:AZ_ZONE     = "unknown"
+  Write-Error "IMDS query failed: $($_.Exception.Message)"
 }
 
 $instanceId = (hostname)
