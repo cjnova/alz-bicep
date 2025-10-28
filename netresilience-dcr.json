@@ -1,0 +1,34 @@
+{
+  "location": "brazilsouth",
+  "properties": {
+    "dataSources": {
+      "logFiles": [
+        {
+          "name": "netresilience-jsonl",
+          "streams": [ "Custom-Logs" ],
+          "filePatterns": [ "/var/log/net-resilience/*.jsonl" ],
+          "settings": {
+            "textFormat": "json",
+            "fileEncoding": "utf-8",
+            "captureMultiLineLogs": false
+          }
+        }
+      ]
+    },
+    "destinations": {
+      "logAnalytics": [
+        {
+          "name": "law-dest",
+          "workspaceResourceId": "/subscriptions/slz01-pro-zb1-regionalplatform001/resourceGroups/slz-pro-zb1-ResiliencyTesting/providers/Microsoft.OperationalInsights/workspaces/netresilience-law"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": [ "Custom-Logs" ],
+        "destinations": [ "law-dest" ],
+        "transformKql": "source | extend TimeGenerated = todatetime(TimeGenerated)"
+      }
+    ]
+  }
+}
