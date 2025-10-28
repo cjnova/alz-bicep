@@ -1,0 +1,14 @@
+{
+  "TimeGenerated": "2025-10-28T05:42:13.000Z",
+  "AzLocation": "brazilsouth",
+  "AzZone": "1",
+  "VmInstance": "vmtest001",
+  "TestType": "Ping",
+  "Target": "10.20.30.40",
+  "Protocol": "ICMP",
+  "LatencyMs": 23,
+  "Success": true,
+  "StatusCode": "200",
+  "Error": "",
+  "CorrelationId": "c1f8a9b2-3d4e-4a6f-9f21-8a2b7c1d9e45"
+}
