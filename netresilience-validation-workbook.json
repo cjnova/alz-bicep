@@ -1,0 +1,56 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": {
+          "version": "KqlItem/1.0",
+          "query": "NetworkResilience_CL\n| summarize Count = count() by bin(TimeGenerated, 5m)\n| order by TimeGenerated desc",
+          "size": 0,
+          "title": "Ingestion Volume (5m bins)"
+        }
+      },
+      "name": "IngestionVolume"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": {
+          "version": "KqlItem/1.0",
+          "query": "NetworkResilience_CL\n| summarize SuccessRate = 100.0 * avg(tobool(Success)) by bin(TimeGenerated, 15m), Protocol\n| order by TimeGenerated desc",
+          "size": 0,
+          "title": "Success Rate by Protocol"
+        }
+      },
+      "name": "SuccessRate"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": {
+          "version": "KqlItem/1.0",
+          "query": "NetworkResilience_CL\n| where Success == true and isnotempty(LatencyMs)\n| summarize p50 = percentile(LatencyMs, 50), p95 = percentile(LatencyMs, 95) by bin(TimeGenerated, 15m), Target\n| order by TimeGenerated desc",
+          "size": 0,
+          "title": "Latency Percentiles (p50, p95)"
+        }
+      },
+      "name": "LatencyPercentiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": {
+          "version": "KqlItem/1.0",
+          "query": "NetworkResilience_CL\n| where Success == false\n| summarize Failures = count() by Target, Protocol, StatusCode, Error, bin(TimeGenerated, 30m)\n| order by Failures desc",
+          "size": 0,
+          "title": "Error Breakdown"
+        }
+      },
+      "name": "ErrorBreakdown"
+    }
+  ],
+  "fallbackResourceIds": [
+    "/subscriptions/slz01-pro-zb1-regionalplatform001/resourceGroups/slz-pro-zb1-ResiliencyTesting/providers/Microsoft.OperationalInsights/workspaces/netresilience-law"
+  ]
+}
