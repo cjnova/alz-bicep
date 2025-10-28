@@ -5,8 +5,26 @@
   "tags": ["network", "resilience", "azure"],
   "timezone": "browser",
   "schemaVersion": 36,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "VmInstance",
+        "label": "Host",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-azure-monitor-datasource",
+          "uid": "azure-monitor"
+        },
+        "query": "NetworkResilience_CL | distinct VmInstance",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": "*"
+      }
+    ]
+  },
   "panels": [
     {
       "type": "timeseries",
@@ -19,7 +37,7 @@
         {
           "queryType": "Azure Monitor Logs",
           "refId": "A",
-          "query": "NetworkResilience_CL\n| summarize SuccessRate = 100.0 * avg(tobool(Success)) by VmInstance, AzLocation, AzZone, Protocol, bin(TimeGenerated, 5m)\n| order by TimeGenerated asc"
+          "query": "NetworkResilience_CL\n| where VmInstance in (${VmInstance:csv})\n| summarize SuccessRate = 100.0 * avg(tobool(Success)) by VmInstance, AzLocation, AzZone, Protocol, bin(TimeGenerated, 5m)\n| order by TimeGenerated asc"
         }
       ],
       "fieldConfig": {
@@ -45,7 +63,7 @@
         {
           "queryType": "Azure Monitor Logs",
           "refId": "B",
-          "query": "NetworkResilience_CL\n| where Success == true and isnotempty(LatencyMs)\n| summarize p50 = percentile(LatencyMs, 50), p95 = percentile(LatencyMs, 95) by VmInstance, Target, Protocol, bin(TimeGenerated, 15m)\n| order by TimeGenerated asc"
+          "query": "NetworkResilience_CL\n| where VmInstance in (${VmInstance:csv}) and Success == true and isnotempty(LatencyMs)\n| summarize p50 = percentile(LatencyMs, 50), p95 = percentile(LatencyMs, 95) by VmInstance, Target, Protocol, bin(TimeGenerated, 15m)\n| order by TimeGenerated asc"
         }
       ],
       "fieldConfig": {
@@ -71,10 +89,14 @@
         {
           "queryType": "Azure Monitor Logs",
           "refId": "C",
-          "query": "NetworkResilience_CL\n| where Success == false\n| summarize Failures = count() by VmInstance, Target, Protocol, StatusCode, Error, bin(TimeGenerated, 30m)\n| order by Failures desc"
+          "query": "NetworkResilience_CL\n| where VmInstance in (${VmInstance:csv}) and Success == false\n| summarize Failures = count() by VmInstance, Target, Protocol, StatusCode, Error, bin(TimeGenerated, 30m)\n| order by Failures desc"
         }
       ],
       "options": {
         "showHeader": true,
         "sortBy": [{ "displayName": "Failures", "desc": true }]
-     
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 }
+    }
+  ]
+}
