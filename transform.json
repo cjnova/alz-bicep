@@ -1,19 +1,14 @@
-{
-  "schema": {
-    "name": "NetworkResilience_CL",
-    "columns": [
-      { "name": "TimeGenerated", "type": "DateTime" },
-      { "name": "AzLocation",    "type": "String" },
-      { "name": "AzZone",        "type": "String" },
-      { "name": "VmInstance",    "type": "String" },
-      { "name": "TestType",      "type": "String" },
-      { "name": "Target",        "type": "String" },
-      { "name": "Protocol",      "type": "String" },
-      { "name": "LatencyMs",     "type": "Int64" },
-      { "name": "Success",       "type": "Boolean" },
-      { "name": "StatusCode",    "type": "String" },
-      { "name": "Error",         "type": "String" },
-      { "name": "CorrelationId", "type": "String" }
-    ]
-  }
-}
+source
+| extend
+    TimeGenerated = todatetime(TimeGenerated),
+    AzLocation    = tostring(AzLocation),
+    AzZone        = tostring(AzZone),
+    VmInstance    = tostring(VmInstance),
+    TestType      = tostring(TestType),
+    Target        = tostring(Target),
+    Protocol      = tostring(Protocol),
+    LatencyMs     = toint(LatencyMs),
+    Success       = tobool(Success),
+    StatusCode    = tostring(StatusCode),
+    Error         = tostring(Error),
+    CorrelationId = tostring(CorrelationId)
