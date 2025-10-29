@@ -1,5 +1,5 @@
 param(
-  [string]$ConfigFile = "/etc/net-resilience.conf"
+  [string]$ConfigFile = ".\net-resilience.conf"
 )
 
 # Load config
@@ -54,31 +54,22 @@ Register-EngineEvent ConsoleCancelEventHandler -Action { $global:StopRequested =
 
 $jobs = @()
 
-foreach ($targetHost in $icmpHosts) {
+foreach ($eachHost in $icmpHosts) {
   $jobs += Start-ThreadJob -InitializationScript $init -ScriptBlock {
     param($TargetHost,$IntervalSec,$LogDir,$AzLocation,$AzZone,$VmInstance)
 
     while (-not $global:StopRequested) {
       $ts = (Get-Date).ToString("o")
       $cid = [guid]::NewGuid()
-      try {
         $pingResult = Test-Connection -ComputerName $TargetHost -Count 1 -ErrorAction Stop
-        $latency = $pingResult.ResponseTime
         Write-EventJson @{
           TimeGenerated=$ts; AzLocation=$AzLocation; AzZone=$AzZone; VmInstance=$VmInstance
-          TestType='OnPrem'; Target=$TargetHost; Protocol='ICMP'; LatencyMs=$latency
-          Success=$true; StatusCode='Reply'; Error=$null; CorrelationId=$cid
+          TestType='OnPrem'; Target=$TargetHost; Protocol='ICMP'; LatencyMs=$pingResult.Latency
+          Success=$true; StatusCode=$pingResult.Status; Error=$null; CorrelationId=$cid
         } $LogDir
-      } catch {
-        Write-EventJson @{
-          TimeGenerated=$ts; AzLocation=$AzLocation; AzZone=$AzZone; VmInstance=$VmInstance
-          TestType='OnPrem'; Target=$TargetHost; Protocol='ICMP'; LatencyMs=$null
-          Success=$false; StatusCode='Timeout'; Error=$_.Exception.Message; CorrelationId=$cid
-        } $LogDir
-      }
       Start-Sleep -Seconds $IntervalSec
     }
-  } -ArgumentList $host,$PingIntervalSec,$LogDir,$env:AZ_LOCATION,$env:AZ_ZONE,$instanceId
+  } -ArgumentList $eachHost,$PingIntervalSec,$LogDir,$env:AZ_LOCATION,$env:AZ_ZONE,$instanceId
 }
 
 foreach ($url in $httpHosts) {
@@ -90,7 +81,7 @@ foreach ($url in $httpHosts) {
       $cid = [guid]::NewGuid()
       try {
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $resp = Invoke-WebRequest -Uri $TargetUrl -TimeoutSec 10 -UseBasicParsing
+        $resp = Invoke-WebRequest -Uri $TargetUrl -TimeoutSec 10 -UseBasicParsing -SkipCertificateCheck
         $sw.Stop()
         Write-EventJson @{
           TimeGenerated=$ts; AzLocation=$AzLocation; AzZone=$AzZone; VmInstance=$VmInstance
