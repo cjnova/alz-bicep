@@ -9,6 +9,9 @@ param grafanaName string
 param enableGrafana bool = true
 param grafanaZoneRedundancy bool = false
 
+// RBAC parameters
+param enableRbacAssignments bool = true
+
 // VM deployment parameters
 param vmNamePrefix string
 param vmCount int = 3
@@ -150,6 +153,11 @@ resource existingVms 'Microsoft.Compute/virtualMachines@2024-07-01' existing = [
   name: '${vmNamePrefix}-${i + 1}'
 }]
 
+// Reference the deployed DCR for role assignments
+resource existingDcr 'Microsoft.Insights/dataCollectionRules@2023-03-11' existing = {
+  name: dcrName
+}
+
 // Create DCR associations as extension resources scoped to each VM
 resource dcrAssociations 'Microsoft.Insights/dataCollectionRuleAssociations@2023-03-11' = [for i in range(0, vmCount): {
   name: 'dcra-${vmNamePrefix}-${i + 1}'
@@ -161,6 +169,36 @@ resource dcrAssociations 'Microsoft.Insights/dataCollectionRuleAssociations@2023
     vmDeployment
   ]
 }]
+
+// Grant VM managed identities permission to send data to DCR
+resource dcrRoleAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, vmCount): if (enableRbacAssignments) {
+  name: guid(existingDcr.id, existingVms[i].id, '3913510d-42f4-4e42-8a64-420c390055eb')
+  scope: existingDcr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb') // Monitoring Metrics Publisher
+    principalId: vmDeployment.outputs.systemAssignedMIPrincipalIds[i]
+    principalType: 'ServicePrincipal'
+  }
+  dependsOn: [
+    dcrAssociations
+  ]
+}]
+
+// Reference LAW for Grafana role assignment
+resource existingLaw 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = if (enableRbacAssignments && enableGrafana) {
+  name: workspaceName
+}
+
+// Grant Grafana managed identity permission to read from LAW
+resource grafanaLawRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableRbacAssignments && enableGrafana) {
+  name: guid(existingLaw.id, grafanaName, '43d0d8ad-25c7-4714-9337-8ba259a9fe05')
+  scope: existingLaw
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '43d0d8ad-25c7-4714-9337-8ba259a9fe05') // Monitoring Reader
+    principalId: grafana!.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
 
 // Outputs
 output lawResourceId string = law.outputs.resourceId

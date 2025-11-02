@@ -11,15 +11,20 @@ param grafanaName = 'grafana-net-resilience-prod'
 param enableGrafana = true
 param grafanaZoneRedundancy = false
 
+// RBAC parameters
+// Set to false if deploying with Contributor role (role assignments will need to be done separately)
+// Set to true if deploying with Owner or User Access Administrator role
+param enableRbacAssignments = true
+
 // VM deployment parameters
 param vmNamePrefix = 'vm-netres'
 param vmCount = 3
 param adminUsername = 'azureuser'
-param adminPassword = '' // Provide via secure parameter or Key Vault reference
+param adminPassword = '' // Leave empty - Azure CLI/PowerShell will prompt securely during deployment
 param vnetName = 'vnet-prod'  // Update with your existing VNet name
 param subnetName = 'subnet-vms'  // Update with your existing subnet name
 param osType = 'Linux'
-param vmSize = 'Standard_B2s'
+param vmSize = 'Standard_B2ts_v2'
 param disablePasswordAuthentication = false
 param enableEntraIdLogin = true
 param encryptionAtHost = true

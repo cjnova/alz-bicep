@@ -18,12 +18,13 @@ This Bicep template orchestrates the deployment of a complete Azure monitoring s
 │  (Workspace) │    │  (Standard)  │    │  (Endpoint)  │  │  (Rule) │
 └──────────────┘    └──────────────┘    └──────────────┘  └─────┬───┘
                                                                  │
-                                                                 │ Associated via
+                                                                 │ DCRA + RBAC
                                                                  ▼
                                                           ┌──────────────┐
                                                           │   vms.bicep  │
-                                                          │  (3 VMs in   │
-                                                          │     AZs)     │
+                                                          │  (3 VMs with │
+                                                          │   Monitoring │
+                                                          │   Publisher) │
                                                           └──────────────┘
 ```
 
@@ -50,27 +51,61 @@ This Bicep template orchestrates the deployment of a complete Azure monitoring s
 ### 4. Virtual Machines (via vms.bicep)
 - **Count**: 3 VMs across availability zones 1, 2, 3
 - **OS**: Ubuntu 24.04 LTS (Noble)
-- **Size**: Standard_B2s
+- **Size**: Standard_B2ts_v2 (2 vCPU, 1 GB RAM)
 - **Disk**: 30 GB Premium SSD
+- **Managed Identity**: System-assigned enabled
 - **Features**:
   - Encryption at Host enabled
   - Entra ID login enabled
   - Cloud-init for configuration
-  - Azure Monitor Agent installation
+  - Azure Monitor Agent (auto-installed via DCRA)
 
 ### 5. Data Collection Rule Associations (DCRA)
 - **Purpose**: Associate DCR with each VM
 - **Scope**: Each VM resource
+- **Effect**: Automatically installs Azure Monitor Agent (AMA)
 - **API Version**: 2023-03-11
 
-### 6. Azure Managed Grafana (Optional)
+### 6. RBAC Permissions
+
+#### 6.1 VM to DCR Permissions
+- **Purpose**: Grant VMs permission to send data to DCR
+- **Role**: Monitoring Metrics Publisher (`3913510d-42f4-4e42-8a64-420c390055eb`)
+- **Scope**: Data Collection Rule
+- **Principal**: Each VM's system-assigned managed identity
+- **Automatic**: Role assignments created during deployment
+
+#### 6.2 Grafana to LAW Permissions
+- **Purpose**: Grant Grafana permission to query data from LAW
+- **Role**: Monitoring Reader (`43d0d8ad-25c7-4714-9337-8ba259a9fe05`)
+- **Scope**: Log Analytics Workspace
+- **Principal**: Grafana's system-assigned managed identity
+- **Automatic**: Role assignment created during deployment (if Grafana enabled)
+
+**Complete Permission Flow:**
+```
+VM Managed Identity
+    ↓ [Monitoring Metrics Publisher on DCR]
+    ↓
+Data Collection Rule
+    ↓ [Built-in permissions]
+    ↓
+Log Analytics Workspace ←─────────────┐
+                                       │
+                      [Monitoring Reader]
+                                       │
+                        Grafana Managed Identity
+```
+
+### 7. Azure Managed Grafana (Optional)
 - **SKU**: Standard (non-Enterprise)
 - **Version**: Grafana 10
 - **Integration**: Automatic Log Analytics datasource
 - **Authentication**: Microsoft Entra ID (Azure AD)
 - **API Version**: 2024-10-01
+- **Managed Identity**: System-assigned (auto-granted Monitoring Reader on LAW)
 - **Features**:
-  - System-assigned managed identity
+  - Automatic RBAC for LAW data access
   - API key authentication enabled
   - Public network access (configurable)
   - Optional zone redundancy for HA
@@ -79,20 +114,22 @@ This Bicep template orchestrates the deployment of a complete Azure monitoring s
 
 ```
 LAW test/
-├── main.bicep                    # Orchestration template
-├── README.md                     # Quick start guide
-├── .gitignore                    # Git ignore rules
+├── main.bicep                         # Main orchestration template
+├── README.md                          # Quick start guide
+├── .gitignore                         # Git ignore rules
 │
-├── modules/                      # Reusable Bicep modules
-│   ├── vms.bicep                # VM deployment module
-│   └── grafana.bicep            # Managed Grafana module
+├── modules/                           # Reusable Bicep modules
+│   ├── vms.bicep                     # VM deployment module
+│   ├── grafana.bicep                 # Managed Grafana module
+│   └── rbac-assignments.bicep        # RBAC role assignments module
 │
-├── parameters/                   # All parameter files
-│   ├── main.bicepparam          # Production parameters (main deployment)
-│   └── vms.bicepparam           # VM unit testing parameters
+├── parameters/                        # All parameter files
+│   ├── main.bicepparam               # Production deployment parameters
+│   ├── rbac-assignments.bicepparam   # RBAC-only deployment parameters
+│   └── vms.bicepparam                # VM unit testing parameters
 │
-└── docs/                        # Documentation
-    └── README.md                # Complete detailed documentation (this file)
+└── docs/                             # Documentation
+    └── README.md                     # Complete detailed documentation (this file)
 ```
 
 ## Prerequisites
@@ -132,8 +169,28 @@ LAW test/
 | `disablePasswordAuthentication` | `false` | Disable password auth (use SSH keys) |
 | `enableGrafana` | `true` | Deploy Managed Grafana instance |
 | `grafanaZoneRedundancy` | `false` | Enable zone redundancy for Grafana |
+| `enableRbacAssignments` | `true` | Automatically create RBAC role assignments (requires Owner/UAA role) |
 
 ## Deployment
+
+### Deployment Scenarios
+
+#### Scenario A: You Have Owner or User Access Administrator Role ✅ (Recommended)
+
+Follow the standard deployment process below. RBAC assignments will be created automatically.
+
+#### Scenario B: You Have Only Contributor Role ⚠️
+
+If you only have **Contributor** role, you cannot create RBAC role assignments. You have two options:
+
+**Option 1: Skip RBAC during deployment, add later**
+1. Set `enableRbacAssignments = false` in `parameters/main.bicepparam`
+2. Deploy the infrastructure (resources will be created)
+3. Request an admin with Owner/UAA role to run the RBAC assignment template (see [Manual RBAC Assignment](#manual-rbac-assignment-for-contributor-role))
+
+**Option 2: Request elevated permissions**
+- Ask your Azure admin to grant you **User Access Administrator** role on the resource group
+- Then deploy with `enableRbacAssignments = true` (default)
 
 ### Step 1: Update Parameters
 
@@ -142,43 +199,111 @@ Edit `parameters/main.bicepparam` and provide:
 - A secure **admin password**
 - Desired **Azure region** (location)
 - Grafana name (or disable with `enableGrafana = false`)
+- **Leave `adminPassword` empty** - you'll provide it interactively during deployment
 
 ```bicep
 param location = 'eastus'
 param vnetName = 'your-vnet-name'
 param subnetName = 'your-subnet-name'
-param adminPassword = '...' // Use secure parameter or Key Vault reference
+param adminPassword = ''  // Leave empty - will be prompted during deployment
 param grafanaName = 'grafana-net-resilience-prod'
 param enableGrafana = true
 ```
 
-### Step 2: Validate the Deployment
+### Step 2: Validate the Template
+
+Validate that the Bicep template is syntactically correct and all parameters are valid.
+
+**Note**: Since `adminPassword` is a secure parameter, you'll be prompted to enter it interactively:
 
 ```bash
-# Azure CLI
+# Azure CLI - will prompt for password
 az deployment group validate \
   --resource-group <your-rg-name> \
   --template-file main.bicep \
   --parameters parameters/main.bicepparam
 
-# Azure PowerShell
+# Azure CLI - provide password inline (not recommended - visible in history)
+az deployment group validate \
+  --resource-group <your-rg-name> \
+  --template-file main.bicep \
+  --parameters parameters/main.bicepparam \
+  --parameters adminPassword='YourSecureP@ssw0rd'
+
+# Azure PowerShell - will prompt for password as SecureString
 Test-AzResourceGroupDeployment `
   -ResourceGroupName <your-rg-name> `
   -TemplateFile main.bicep `
   -TemplateParameterFile parameters/main.bicepparam
 ```
 
-### Step 3: Deploy
+**Password Requirements:**
+- Minimum 12 characters
+- Contains uppercase, lowercase, number, and special character
+- Not a common password
+
+**What validation checks:**
+- ✅ Template syntax is correct
+- ✅ All required parameters are provided
+- ✅ Parameter values are valid
+- ✅ Resources can be created with current permissions
+- ❌ Does NOT check quota or subscription limits
+
+### Step 3: Preview Changes (What-If)
+
+See exactly what resources will be created, modified, or deleted before deploying.
+
+**Note**: You'll be prompted for the password again:
 
 ```bash
-# Azure CLI
+# Azure CLI - will prompt for password
+az deployment group what-if \
+  --resource-group <your-rg-name> \
+  --template-file main.bicep \
+  --parameters parameters/main.bicepparam
+
+# Azure PowerShell - will prompt for password
+New-AzResourceGroupDeployment `
+  -ResourceGroupName <your-rg-name> `
+  -TemplateFile main.bicep `
+  -TemplateParameterFile parameters/main.bicepparam `
+  -WhatIf
+```
+
+**What-If Output shows:**
+- 🟢 **Create** - Resources that will be created
+- 🟡 **Modify** - Resources that will be updated
+- 🔴 **Delete** - Resources that will be removed
+- ⚪ **No Change** - Resources that already exist and match
+
+**Example output:**
+```
+Resource changes: 10 to create, 0 to modify, 0 to delete.
+
++ Microsoft.Compute/virtualMachines/vm-netres-1
++ Microsoft.Compute/virtualMachines/vm-netres-2
++ Microsoft.Compute/virtualMachines/vm-netres-3
++ Microsoft.Dashboard/grafana/grafana-net-resilience-prod
++ Microsoft.Insights/dataCollectionEndpoints/dce-net-resilience-prod
++ Microsoft.Insights/dataCollectionRules/dcr-net-resilience-prod
+...
+```
+
+### Step 4: Deploy
+
+After reviewing the what-if output and confirming the changes, deploy the infrastructure.
+
+**You'll be prompted to enter the admin password securely:**
+
+```bash
+# Azure CLI - will prompt: "Please provide securestring value for 'adminPassword' (? for help):"
 az deployment group create \
   --resource-group <your-rg-name> \
   --template-file main.bicep \
   --parameters parameters/main.bicepparam \
   --name "netres-monitoring-deployment"
 
-# Azure PowerShell
+# Azure PowerShell - will prompt for password as SecureString
 New-AzResourceGroupDeployment `
   -ResourceGroupName <your-rg-name> `
   -TemplateFile main.bicep `
@@ -186,7 +311,14 @@ New-AzResourceGroupDeployment `
   -Name "netres-monitoring-deployment"
 ```
 
-### Step 4: Verify Deployment
+**When prompted:**
+1. Type your password (characters won't be displayed)
+2. Press Enter
+3. Deployment will proceed
+
+**Deployment takes approximately 10-15 minutes.**
+
+### Step 5: Verify Deployment
 
 After deployment completes, verify:
 
@@ -219,6 +351,134 @@ After deployment completes, verify:
      -n "netres-monitoring-deployment" \
      --query properties.outputs.grafanaEndpoint.value
    ```
+
+## Manual RBAC Assignment (for Contributor Role)
+
+If you deployed with `enableRbacAssignments = false` because you only have Contributor role, follow these steps to add RBAC permissions. **This requires an admin with Owner or User Access Administrator role.**
+
+### Why RBAC is Required
+
+Without RBAC role assignments:
+- ❌ VMs cannot send logs to Log Analytics (no data collection)
+- ❌ Grafana cannot query data from Log Analytics (dashboards won't work)
+
+### Steps for Admin to Grant RBAC
+
+#### Option 1: Using the Provided Bicep Template (Recommended)
+
+**Admin runs this deployment:**
+
+1. **Update parameters** in `parameters/rbac-assignments.bicepparam`:
+   ```bicep
+   param dcrName = 'dcr-net-resilience-prod'  // Match your DCR name
+   param lawName = 'law-net-resilience-prod'  // Match your LAW name
+   param grafanaName = 'grafana-net-resilience-prod'  // Match your Grafana name
+   param enableGrafana = true
+   
+   param vmNames = [
+     'vm-netres-1'  // Match your deployed VM names
+     'vm-netres-2'
+     'vm-netres-3'
+   ]
+   ```
+
+2. **Deploy RBAC assignments**:
+   ```bash
+   # Azure CLI
+   az deployment group create \
+     --resource-group <your-rg-name> \
+     --template-file modules/rbac-assignments.bicep \
+     --parameters parameters/rbac-assignments.bicepparam \
+     --name "rbac-assignment-$(date +%Y%m%d-%H%M%S)"
+   
+   # PowerShell
+   New-AzResourceGroupDeployment `
+     -ResourceGroupName <your-rg-name> `
+     -TemplateFile modules/rbac-assignments.bicep `
+     -TemplateParameterFile parameters/rbac-assignments.bicepparam `
+     -Name "rbac-assignment-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+   ```
+
+3. **Verify assignments**:
+   ```bash
+   # Check VM permissions on DCR
+   az role assignment list \
+     --scope $(az monitor data-collection rule show -g <rg> -n dcr-net-resilience-prod --query id -o tsv) \
+     -o table
+   
+   # Check Grafana permissions on LAW
+   az role assignment list \
+     --scope $(az monitor log-analytics workspace show -g <rg> -n law-net-resilience-prod --query id -o tsv) \
+     -o table
+   ```
+
+#### Option 2: Using Azure CLI Commands
+
+**Admin runs these commands for each VM:**
+
+```bash
+# Get resource IDs
+DCR_ID=$(az monitor data-collection rule show -g <rg> -n dcr-net-resilience-prod --query id -o tsv)
+LAW_ID=$(az monitor log-analytics workspace show -g <rg> -n law-net-resilience-prod --query id -o tsv)
+
+# Grant VM permissions (repeat for each VM)
+for VM_NAME in vm-netres-1 vm-netres-2 vm-netres-3; do
+  VM_IDENTITY=$(az vm show -g <rg> -n $VM_NAME --query identity.principalId -o tsv)
+  
+  az role assignment create \
+    --assignee $VM_IDENTITY \
+    --role "Monitoring Metrics Publisher" \
+    --scope $DCR_ID
+  
+  echo "Assigned Monitoring Metrics Publisher to $VM_NAME"
+done
+
+# Grant Grafana permission
+GRAFANA_IDENTITY=$(az grafana show -g <rg> -n grafana-net-resilience-prod --query identity.principalId -o tsv)
+
+az role assignment create \
+  --assignee $GRAFANA_IDENTITY \
+  --role "Monitoring Reader" \
+  --scope $LAW_ID
+
+echo "Assigned Monitoring Reader to Grafana"
+```
+
+#### Option 3: Using Azure Portal (Manual)
+
+**For VM Permissions:**
+1. Navigate to your **Data Collection Rule** in Azure Portal
+2. Go to **Access control (IAM)** → **Add role assignment**
+3. Select role: **Monitoring Metrics Publisher**
+4. Assign access to: **Managed identity**
+5. Select members: Choose each VM (vm-netres-1, vm-netres-2, vm-netres-3)
+6. Click **Review + assign**
+
+**For Grafana Permission:**
+1. Navigate to your **Log Analytics Workspace** in Azure Portal
+2. Go to **Access control (IAM)** → **Add role assignment**
+3. Select role: **Monitoring Reader**
+4. Assign access to: **Managed identity**
+5. Select members: Choose your Grafana instance
+6. Click **Review + assign**
+
+### Verify RBAC After Assignment
+
+After admin completes RBAC assignment, verify:
+
+```bash
+# Test log ingestion (create a test log file on VM)
+ssh azureuser@<vm-ip>
+sudo mkdir -p /var/log/net-resilience
+echo '{"timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","level":"INFO","message":"RBAC test"}' | sudo tee /var/log/net-resilience/net-test.jsonl
+
+# Wait 5-10 minutes, then query LAW
+az monitor log-analytics query \
+  -w <workspace-id> \
+  --analytics-query "NetResilience_CL | where message_s contains 'RBAC test' | take 10"
+```
+
+Expected: You should see the test log entry, confirming VMs can send logs.
 
 ## Post-Deployment Configuration
 
@@ -363,6 +623,23 @@ az deployment group show \
 2. **Check DCR configuration**: Ensure file pattern matches your log files
 3. **Verify log file permissions**: AMA needs read access
 4. **Check log format**: Must be valid JSON for JSON format type
+5. **Verify RBAC permissions**: Check VM managed identity has Monitoring Metrics Publisher on DCR
+   ```bash
+   # Get VM's managed identity principal ID
+   VM_IDENTITY=$(az vm show -g <rg> -n vm-netres-1 --query identity.principalId -o tsv)
+   
+   # Get DCR resource ID
+   DCR_ID=$(az monitor data-collection rule show -g <rg> -n dcr-net-resilience-prod --query id -o tsv)
+   
+   # Check role assignment exists
+   az role assignment list --assignee $VM_IDENTITY --scope $DCR_ID -o table
+   ```
+
+6. **Test log file creation**: Create a test log file to verify AMA is reading
+   ```bash
+   sudo mkdir -p /var/log/net-resilience
+   echo '{"timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","level":"INFO","message":"Test log"}' | sudo tee /var/log/net-resilience/net-test.jsonl
+   ```
 
 ### Cannot access Grafana
 
@@ -374,12 +651,25 @@ az deployment group show \
      --query properties.outputs.grafanaEndpoint.value
    ```
 
-2. **Check permissions**: Your Azure AD account needs access
+2. **Check user permissions**: Your Azure AD account needs access
    - Navigate to Grafana resource in Azure Portal
    - Go to **Access control (IAM)**
    - Add yourself as **Grafana Admin** or **Grafana Editor**
 
-3. **Disable Grafana**: Set `enableGrafana = false` in parameters if not needed
+3. **Verify Grafana has LAW access**: Check Monitoring Reader role is assigned
+   ```bash
+   # Get Grafana's managed identity
+   GRAFANA_IDENTITY=$(az grafana show -g <rg> -n grafana-net-resilience-prod --query identity.principalId -o tsv)
+   
+   # Get LAW resource ID
+   LAW_ID=$(az monitor log-analytics workspace show -g <rg> -n law-net-resilience-prod --query id -o tsv)
+   
+   # Check role assignment
+   az role assignment list --assignee $GRAFANA_IDENTITY --scope $LAW_ID -o table
+   ```
+   Expected: Should show "Monitoring Reader" role
+
+4. **Disable Grafana**: Set `enableGrafana = false` in parameters if not needed
 
 ### Deployment errors
 
@@ -406,7 +696,10 @@ Common issues:
    publicNetworkAccess: 'Disabled'
    ```
 
-4. **Managed Identities**: VMs use managed identity for Azure Monitor Agent authentication
+4. **Managed Identities**: VMs use system-assigned managed identity for authentication
+   - AMA uses VM's managed identity to authenticate to DCR
+   - Monitoring Metrics Publisher role automatically assigned during deployment
+   - No credentials stored on VM - secure by default
 
 ## Maintenance
 

@@ -8,13 +8,13 @@ param location = 'eastus'
 param vmNamePrefix = 'myvm'
 param vmCount = 3
 param adminUsername = 'azureuser'
-param adminPassword = '' // Set this value or use Key Vault reference
+param adminPassword = '' // Leave empty - Azure CLI/PowerShell will prompt securely during deployment
 param vnetName = '' // Name of existing virtual network
 param subnetName = '' // Name of existing subnet
 
 // VM Configuration Parameters
 param osType = 'Linux'
-param vmSize = 'Standard_D2s_v3'
+param vmSize = 'Standard_B2ts_v2'
 param disablePasswordAuthentication = false
 param enableEntraIdLogin = true
 param encryptionAtHost = true

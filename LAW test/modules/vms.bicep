@@ -70,3 +70,4 @@ module vms 'br/public:avm/res/compute/virtual-machine:0.20.0' = [for i in range(
 
 output vmNames array = [for i in range(0, vmCount): vms[i].outputs.name]
 output vmIds array = [for i in range(0, vmCount): vms[i].outputs.resourceId]
+output systemAssignedMIPrincipalIds array = [for i in range(0, vmCount): vms[i].outputs.systemAssignedMIPrincipalId!]
