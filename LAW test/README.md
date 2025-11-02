@@ -57,6 +57,7 @@ az deployment group create \
 - **Log Analytics Workspace** - Central log repository
 - **Data Collection Endpoint** - Log ingestion endpoint
 - **Data Collection Rule** - Custom JSON log collection config
+- **Azure Managed Grafana** - Monitoring dashboards (Standard tier)
 - **3 Virtual Machines** - Ubuntu 24.04 across availability zones
 - **DCR Associations** - Automatic Azure Monitor Agent installation
 
@@ -68,6 +69,12 @@ az vm list -g <your-rg-name> -o table
 
 # Check AMA installation (wait 5-10 minutes)
 az vm extension list -g <your-rg-name> --vm-name vm-netres-1 -o table
+
+# Get Grafana endpoint
+az deployment group show \
+  -g <your-rg-name> \
+  -n "monitoring-deployment" \
+  --query properties.outputs.grafanaEndpoint.value
 ```
 
 ## 📚 Full Documentation
@@ -95,9 +102,11 @@ az deployment group create \
 - ✅ Encryption at host enabled
 - ✅ Microsoft Entra ID login
 - ✅ Automatic Azure Monitor Agent installation
-- ✅ Latest API versions (2024-10-01 for Network)
+- ✅ Managed Grafana dashboards (Standard tier)
+- ✅ Latest API versions (2024-10-01 for Network, Grafana)
 - ✅ Azure Verified Modules (AVM)
 - ✅ Custom JSON log collection
+- ✅ Conditional Grafana deployment
 
 ## 🛠️ Requirements
 

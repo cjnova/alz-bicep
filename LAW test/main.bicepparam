@@ -1,15 +1,11 @@
-using '../main.bicep'
+using './main.bicep'
 
 // Monitoring infrastructure parameters
 param location = 'eastus'
 param workspaceName = 'law-net-resilience-prod'
 param dceName = 'dce-net-resilience-prod'
 param dcrName = 'dcr-net-resilience-prod'
-
-// Grafana parameters
 param grafanaName = 'grafana-net-resilience-prod'
-param enableGrafana = true
-param grafanaZoneRedundancy = false
 
 // VM deployment parameters
 param vmNamePrefix = 'vm-netres'

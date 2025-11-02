@@ -4,6 +4,11 @@ param dceName string
 param dcrName string
 param deploymentTimestamp string = utcNow()
 
+// Grafana parameters
+param grafanaName string
+param enableGrafana bool = true
+param grafanaZoneRedundancy bool = false
+
 // VM deployment parameters
 param vmNamePrefix string
 param vmCount int = 3
@@ -93,6 +98,26 @@ module dcr 'br/public:avm/res/insights/data-collection-rule:0.8.0' = {
   }
 }
 
+// Deploy Managed Grafana (optional)
+module grafana './modules/grafana.bicep' = if (enableGrafana) {
+  name: 'grafana-${deploymentTimestamp}'
+  params: {
+    grafanaName: grafanaName
+    location: location
+    logAnalyticsWorkspaceId: law.outputs.resourceId
+    zoneRedundancy: grafanaZoneRedundancy
+    publicNetworkAccess: true
+    deterministicOutboundIP: false
+    apiKey: true
+    grafanaMajorVersion: '10'
+    tags: {
+      Environment: 'Production'
+      ManagedBy: 'Bicep'
+      Purpose: 'Monitoring-Dashboards'
+    }
+  }
+}
+
 // Deploy VMs
 module vmDeployment './modules/vms.bicep' = {
   name: 'vm-deployment-${deploymentTimestamp}'
@@ -144,3 +169,6 @@ output dceResourceId string = dce.outputs.resourceId
 output dcrResourceId string = dcr.outputs.resourceId
 output vmResourceIds array = vmDeployment.outputs.vmIds
 output vmNames array = vmDeployment.outputs.vmNames
+output grafanaResourceId string = enableGrafana ? grafana!.outputs.resourceId : ''
+output grafanaEndpoint string = enableGrafana ? grafana!.outputs.endpoint : ''
+output grafanaPrincipalId string = enableGrafana ? grafana!.outputs.principalId : ''

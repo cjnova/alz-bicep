@@ -10,21 +10,21 @@ This Bicep template orchestrates the deployment of a complete Azure monitoring s
 │                   (Orchestration Layer)                     │
 └─────────────────────────────────────────────────────────────┘
                             │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│     LAW      │    │     DCE      │    │     DCR      │
-│  (Workspace) │    │  (Endpoint)  │    │    (Rule)    │
-└──────────────┘    └──────────────┘    └──────────────┘
-                                               │
-                                               │ Associated via
-                                               ▼
-                                        ┌──────────────┐
-                                        │   vms.bicep  │
-                                        │  (3 VMs in   │
-                                        │     AZs)     │
-                                        └──────────────┘
+        ┌───────────────────┼───────────────────┬──────────────┐
+        │                   │                   │              │
+        ▼                   ▼                   ▼              ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐  ┌─────────┐
+│     LAW      │◄───│   Grafana    │    │     DCE      │  │   DCR   │
+│  (Workspace) │    │  (Standard)  │    │  (Endpoint)  │  │  (Rule) │
+└──────────────┘    └──────────────┘    └──────────────┘  └─────┬───┘
+                                                                 │
+                                                                 │ Associated via
+                                                                 ▼
+                                                          ┌──────────────┐
+                                                          │   vms.bicep  │
+                                                          │  (3 VMs in   │
+                                                          │     AZs)     │
+                                                          └──────────────┘
 ```
 
 ## Components
@@ -63,14 +63,36 @@ This Bicep template orchestrates the deployment of a complete Azure monitoring s
 - **Scope**: Each VM resource
 - **API Version**: 2023-03-11
 
+### 6. Azure Managed Grafana (Optional)
+- **SKU**: Standard (non-Enterprise)
+- **Version**: Grafana 10
+- **Integration**: Automatic Log Analytics datasource
+- **Authentication**: Microsoft Entra ID (Azure AD)
+- **API Version**: 2024-10-01
+- **Features**:
+  - System-assigned managed identity
+  - API key authentication enabled
+  - Public network access (configurable)
+  - Optional zone redundancy for HA
+
 ## File Structure
 
 ```
 LAW test/
-├── main.bicep              # Orchestration template
-├── main.bicepparam         # Parameter file for main deployment
-├── vms.bicep              # VM deployment module
-└── vms.bicepparam         # Parameter file for VM standalone deployment
+├── main.bicep                    # Orchestration template
+├── README.md                     # Quick start guide
+├── .gitignore                    # Git ignore rules
+│
+├── modules/                      # Reusable Bicep modules
+│   ├── vms.bicep                # VM deployment module
+│   └── grafana.bicep            # Managed Grafana module
+│
+├── parameters/                   # All parameter files
+│   ├── main.bicepparam          # Production parameters (main deployment)
+│   └── vms.bicepparam           # VM unit testing parameters
+│
+└── docs/                        # Documentation
+    └── README.md                # Complete detailed documentation (this file)
 ```
 
 ## Prerequisites
@@ -96,6 +118,7 @@ LAW test/
 | `adminPassword` | VM admin password (secure) | (provide securely) |
 | `vnetName` | Existing VNet name | `vnet-prod` |
 | `subnetName` | Existing subnet name | `subnet-vms` |
+| `grafanaName` | Grafana instance name | `grafana-net-resilience-prod` |
 
 ### Optional Parameters (with defaults)
 
@@ -107,21 +130,26 @@ LAW test/
 | `enableEntraIdLogin` | `true` | Enable Microsoft Entra ID authentication |
 | `encryptionAtHost` | `true` | Enable encryption at host |
 | `disablePasswordAuthentication` | `false` | Disable password auth (use SSH keys) |
+| `enableGrafana` | `true` | Deploy Managed Grafana instance |
+| `grafanaZoneRedundancy` | `false` | Enable zone redundancy for Grafana |
 
 ## Deployment
 
 ### Step 1: Update Parameters
 
-Edit `main.bicepparam` and provide:
+Edit `parameters/main.bicepparam` and provide:
 - Your existing **VNet name** and **subnet name**
 - A secure **admin password**
 - Desired **Azure region** (location)
+- Grafana name (or disable with `enableGrafana = false`)
 
 ```bicep
 param location = 'eastus'
 param vnetName = 'your-vnet-name'
 param subnetName = 'your-subnet-name'
 param adminPassword = '...' // Use secure parameter or Key Vault reference
+param grafanaName = 'grafana-net-resilience-prod'
+param enableGrafana = true
 ```
 
 ### Step 2: Validate the Deployment
@@ -131,13 +159,13 @@ param adminPassword = '...' // Use secure parameter or Key Vault reference
 az deployment group validate \
   --resource-group <your-rg-name> \
   --template-file main.bicep \
-  --parameters main.bicepparam
+  --parameters parameters/main.bicepparam
 
 # Azure PowerShell
 Test-AzResourceGroupDeployment `
   -ResourceGroupName <your-rg-name> `
   -TemplateFile main.bicep `
-  -TemplateParameterFile main.bicepparam
+  -TemplateParameterFile parameters/main.bicepparam
 ```
 
 ### Step 3: Deploy
@@ -147,14 +175,14 @@ Test-AzResourceGroupDeployment `
 az deployment group create \
   --resource-group <your-rg-name> \
   --template-file main.bicep \
-  --parameters main.bicepparam \
+  --parameters parameters/main.bicepparam \
   --name "netres-monitoring-deployment"
 
 # Azure PowerShell
 New-AzResourceGroupDeployment `
   -ResourceGroupName <your-rg-name> `
   -TemplateFile main.bicep `
-  -TemplateParameterFile main.bicepparam `
+  -TemplateParameterFile parameters/main.bicepparam `
   -Name "netres-monitoring-deployment"
 ```
 
@@ -184,7 +212,36 @@ After deployment completes, verify:
    | take 10
    ```
 
+5. **Grafana endpoint**:
+   ```bash
+   az deployment group show \
+     -g <your-rg-name> \
+     -n "netres-monitoring-deployment" \
+     --query properties.outputs.grafanaEndpoint.value
+   ```
+
 ## Post-Deployment Configuration
+
+### Access Azure Managed Grafana
+
+1. **Get the Grafana URL** from deployment outputs (see above)
+2. **Navigate to the URL** in your browser
+3. **Authenticate** using Microsoft Entra ID (your Azure AD account)
+4. **Grant permissions** when prompted
+
+**Grafana is pre-configured with:**
+- ✅ Log Analytics workspace as a datasource
+- ✅ Azure Monitor integration
+- ✅ Managed identity authentication
+
+**Create your first dashboard:**
+1. Click **Dashboards** → **New Dashboard**
+2. Add a panel with this query:
+   ```kql
+   NetResilience_CL
+   | summarize count() by bin(TimeGenerated, 5m)
+   | render timechart
+   ```
 
 ### Azure Monitor Agent Installation
 
@@ -260,6 +317,9 @@ The deployment provides these outputs:
 | `dcrResourceId` | Data Collection Rule resource ID |
 | `vmResourceIds` | Array of VM resource IDs |
 | `vmNames` | Array of VM names |
+| `grafanaResourceId` | Grafana instance resource ID (if enabled) |
+| `grafanaEndpoint` | Grafana dashboard URL (if enabled) |
+| `grafanaPrincipalId` | Grafana managed identity principal ID (if enabled) |
 
 Access outputs:
 
@@ -303,6 +363,23 @@ az deployment group show \
 2. **Check DCR configuration**: Ensure file pattern matches your log files
 3. **Verify log file permissions**: AMA needs read access
 4. **Check log format**: Must be valid JSON for JSON format type
+
+### Cannot access Grafana
+
+1. **Verify deployment**: Check `grafanaEndpoint` output is not empty
+   ```bash
+   az deployment group show \
+     -g <rg> \
+     -n "netres-monitoring-deployment" \
+     --query properties.outputs.grafanaEndpoint.value
+   ```
+
+2. **Check permissions**: Your Azure AD account needs access
+   - Navigate to Grafana resource in Azure Portal
+   - Go to **Access control (IAM)**
+   - Add yourself as **Grafana Admin** or **Grafana Editor**
+
+3. **Disable Grafana**: Set `enableGrafana = false` in parameters if not needed
 
 ### Deployment errors
 
@@ -367,19 +444,26 @@ Estimated monthly costs (East US region):
   - First 5 GB/month: Free
   - Additional data: $2.30/GB
 - **Data Collection**: No additional cost
+- **Managed Grafana (Standard)**: ~$120/month
+  - Includes: Unlimited dashboards, unlimited users
+  - 10 active users included
 
-**Total**: ~$75-100/month (excluding log ingestion)
+**Total**: ~$195-220/month (excluding log ingestion)
 
 To reduce costs:
 - Use **Standard_B1s** for non-production: ~$10/month each
 - Use **Standard HDD** instead of Premium SSD: ~$1.50/month
 - Reduce data retention to 7 days (minimum)
+- **Disable Grafana** if not needed: Set `enableGrafana = false` (saves $120/month)
+- Use **Grafana OSS** on a VM instead (self-managed, $0 license cost)
 
 ## Additional Resources
 
 - [Azure Monitor Agent Overview](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-overview)
 - [Data Collection Rules](https://learn.microsoft.com/azure/azure-monitor/essentials/data-collection-rule-overview)
 - [Custom Logs in Azure Monitor](https://learn.microsoft.com/azure/azure-monitor/agents/data-collection-text-log)
+- [Azure Managed Grafana](https://learn.microsoft.com/azure/managed-grafana/overview)
+- [Grafana Documentation](https://grafana.com/docs/grafana/latest/)
 - [Azure Verified Modules](https://aka.ms/avm)
 
 ## License
