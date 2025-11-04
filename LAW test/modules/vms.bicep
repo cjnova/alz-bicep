@@ -6,6 +6,8 @@ param adminUsername string
 param adminPassword string
 param vnetName string
 param subnetName string
+@description('Optional: Resource group name where VNet is located. Leave empty if in same resource group.')
+param vnetResourceGroup string = ''
 param cloudInitData string
 param osType string
 param vmSize string
@@ -17,9 +19,10 @@ param encryptionAtHost bool
 param deploymentTimestamp string = utcNow()
 param userAssignedIdentityResourceId string
 
-// Get existing virtual network
+// Get existing virtual network (cross-resource-group support)
 resource vnet 'Microsoft.Network/virtualNetworks@2024-10-01' existing = {
   name: vnetName
+  scope: resourceGroup(empty(vnetResourceGroup) ? resourceGroup().name : vnetResourceGroup)
 }
 
 // Get existing subnet
