@@ -37,6 +37,8 @@ param adminUsername string
 param adminPassword string
 param vnetName string
 param subnetName string
+@description('Optional: Resource group name where VNet is located. Leave empty if VNet is in the same resource group as the deployment.')
+param vnetResourceGroup string = ''
 param cloudInitData string
 param osType string
 param vmSize string
@@ -232,6 +234,7 @@ module vmDeployment './modules/vms.bicep' = {
     adminPassword: adminPassword
     vnetName: vnetName
     subnetName: subnetName
+    vnetResourceGroup: vnetResourceGroup
     cloudInitData: cloudInitData
     osType: osType
     vmSize: vmSize
