@@ -20,6 +20,7 @@ param adminUsername = 'azureuser'
 param adminPassword = '' // Leave empty - Azure CLI/PowerShell will prompt securely during deployment
 param vnetName = 'vnet'  // Update with your existing VNet name
 param subnetName = 'snet-01'  // Update with your existing subnet name
+param vnetResourceGroup = ''  // Leave empty if VNet is in same RG, otherwise specify: 'rg-network-prod'
 param osType = 'Linux'
 param vmSize = 'Standard_B2als_v2'
 param disablePasswordAuthentication = false
