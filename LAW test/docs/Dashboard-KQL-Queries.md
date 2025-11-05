@@ -68,6 +68,7 @@ NetResilience_CL
     FailureRate = round(countif(Success == false) * 100.0 / count(), 2)
   by Target, Protocol
 | order by FailureRate desc
+| render table
 ```
 
 **Dashboard Settings:**
@@ -97,6 +98,7 @@ NetResilience_CL
     P99 = round(percentile(LatencyMs, 99), 2)
   by VmInstance, AzZone
 | order by VmInstance asc
+| render table
 ```
 
 **Dashboard Settings:**
@@ -172,6 +174,7 @@ NetResilience_CL
 | project LocalTime, VmInstance, Target, Protocol, StatusCode, StatusName, Error
 | order by todatetime(LocalTime) desc
 | take 20
+| render table
 ```
 
 **Dashboard Settings:**
@@ -198,6 +201,7 @@ NetResilience_CL
     Failures = countif(Success == false)
   by VmInstance
 | order by VmInstance asc
+| render barchart
 ```
 
 **Dashboard Settings:**
