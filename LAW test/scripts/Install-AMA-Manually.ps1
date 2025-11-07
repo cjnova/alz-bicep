@@ -39,10 +39,17 @@
     This agent is automatically installed when Azure Policy configurations are assigned to VMs.
     Only install manually if you have specific policy requirements.
 
+.PARAMETER ProxyAddress
+    The proxy server address in format "http://proxy-host:proxy-port".
+    If not specified, no proxy configuration is added to AMA.
+
+.PARAMETER ProxyAuth
+    Enable proxy authentication. Only used when ProxyAddress is specified.
+
 .EXAMPLE
     .\Install-AMA-Manually.ps1
     
-    Installs AMA on all VMs using default parameters.
+    Installs AMA on all VMs using default parameters (no proxy).
 
 .EXAMPLE
     .\Install-AMA-Manually.ps1 -VmCount 3 -ResourceGroup "my-rg"
@@ -54,13 +61,26 @@
     
     Installs both AMA and Guest Configuration agent on all VMs.
 
+.EXAMPLE
+    .\Install-AMA-Manually.ps1 -ProxyAddress "http://proxy.contoso.com:8080" -ProxyAuth
+    
+    Installs AMA with proxy configuration and authentication enabled.
+
+.EXAMPLE
+    .\Install-AMA-Manually.ps1 -ProxyAddress "http://10.0.0.100:3128"
+    
+    Installs AMA with proxy configuration without authentication.
+
 .NOTES
     Prerequisites:
     - Azure CLI installed and authenticated (az login)
     - Appropriate permissions on the resource group and VMs
     - User-assigned managed identity must exist
     - User-assigned identity must have Monitoring Metrics Publisher role on DCR
-    
+
+    Configuration:
+    -  /etc/systemd/system/azuremonitor-coreagent.service.d/proxy.conf
+
     Author: Azure Monitoring Team
     Date: November 2025
 #>
@@ -83,7 +103,13 @@ param(
     [string]$ManagedIdentityName = "id-ama-net-resilience",
     
     [Parameter(Mandatory=$false)]
-    [switch]$InstallGuestConfiguration
+    [switch]$InstallGuestConfiguration,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$ProxyAddress = "",
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$ProxyAuth
 )
 
 # ============================================================================
@@ -247,6 +273,17 @@ for ($i = 1; $i -le $VmCount; $i++) {
                 }
             }
         }
+        
+        # Add proxy configuration if provided
+        if ($ProxyAddress) {
+            Write-Host "      Configuring AMA with proxy: $ProxyAddress" -ForegroundColor Cyan
+            $settingsContent.proxy = @{
+                mode = "application"
+                address = $ProxyAddress
+                auth = $ProxyAuth.IsPresent
+            }
+        }
+        
         $settingsContent | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsFile -Encoding utf8
         
         # Capture both stdout and stderr to show detailed errors
